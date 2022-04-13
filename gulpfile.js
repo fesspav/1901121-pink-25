@@ -1,24 +1,57 @@
+import bemValidator from 'gulp-html-bem-validator';
+import browser from 'browser-sync';
 import gulp from 'gulp';
-import plumber from 'gulp-plumber';
+import lintspaces from 'gulp-lintspaces';
+import posthtml from 'gulp-posthtml';
+import rename from 'gulp-rename';
 import less from 'gulp-less';
 import postcss from 'gulp-postcss';
 import autoprefixer from 'autoprefixer';
-import browser from 'browser-sync';
+import stylelint from 'stylelint';
+import postcssBemLinter from 'postcss-bem-linter';
+import postcssReporter from 'postcss-reporter';
 
-// Styles
+const { src, dest, watch, series, parallel } = gulp;
+const checkLintspaces = () => lintspaces({
+  editorconfig: '.editorconfig'
+});
+const editorconfigSources = [
+  'source/njk/**/*.njk',
+  '*.json',
+  '*.js',
+  'source/img/**/*.svg'
+];
 
-export const styles = () => {
-  return gulp.src('source/less/style.less', { sourcemaps: true })
-    .pipe(plumber())
-    .pipe(less())
-    .pipe(postcss([
-      autoprefixer()
-    ]))
-    .pipe(gulp.dest('source/css', { sourcemaps: '.' }))
-    .pipe(browser.stream());
-}
+export const buildHTML = () => src('source/njk/pages/**/*.njk')
+  .pipe(posthtml())
+  .pipe(bemValidator())
+  .pipe(rename({ extname: '.html' }))
+  .pipe(dest('source'))
+  .pipe(browser.stream());
 
-// Server
+export const testEditorconfig = () => src(editorconfigSources)
+  .pipe(checkLintspaces())
+  .pipe(lintspaces.reporter());
+
+export const styles = () => src('source/less/style.less', { sourcemaps: true })
+  .pipe(less())
+  .pipe(postcss([
+    autoprefixer()
+  ]))
+  .pipe(dest('source/css', { sourcemaps: '.' }))
+  .pipe(browser.stream());
+
+export const testStyles = () => src('source/less/**/*.less', { sourcemaps: true })
+  .pipe(checkLintspaces())
+  .pipe(lintspaces.reporter())
+  .pipe(postcss([
+    stylelint(),
+    postcssBemLinter(),
+    postcssReporter({
+      clearAllMessages: true,
+      throwError: false
+    })
+  ]));
 
 const server = (done) => {
   browser.init({
@@ -30,16 +63,14 @@ const server = (done) => {
     ui: false,
   });
   done();
-}
-
-// Watcher
+};
 
 const watcher = () => {
-  gulp.watch('source/less/**/*.less', gulp.series(styles));
-  gulp.watch('source/*.html').on('change', browser.reload);
-}
+  watch(editorconfigSources, series(testEditorconfig, buildHTML));
+  watch('source/less/**/*.less', series(testStyles, styles));
+};
 
+export const build = parallel(buildHTML, styles);
+export const test = parallel(testEditorconfig, testStyles);
 
-export default gulp.series(
-  styles, server, watcher
-);
+export default series(test, build, server, watcher);
